@@ -1,0 +1,41 @@
+#!/usr/bin/env sh
+
+set -eu
+
+SELF_PATH="$0"
+while [ -h "${SELF_PATH}" ]; do
+  SELF_DIR="$(CDPATH= cd -- "$(dirname -- "${SELF_PATH}")" && pwd)"
+  LINK_TARGET="$(readlink "${SELF_PATH}")"
+  case "${LINK_TARGET}" in
+    /*) SELF_PATH="${LINK_TARGET}" ;;
+    *) SELF_PATH="${SELF_DIR}/${LINK_TARGET}" ;;
+  esac
+done
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${SELF_PATH}")" && pwd)"
+
+. "${SCRIPT_DIR}/_kiro_gateway_common.sh"
+
+kiro_gateway_init_env "$0"
+
+if ! gateway_pid="$(find_running_gateway_pid)"; then
+  print_error "Kiro Gateway is not running on port ${KIRO_GATEWAY_PORT}."
+  rm -f "${KIRO_GATEWAY_PID_FILE}"
+  exit 0
+fi
+
+print_error "Stopping Kiro Gateway PID ${gateway_pid} ..."
+kill "${gateway_pid}" >/dev/null 2>&1 || true
+
+attempts=10
+while kill -0 "${gateway_pid}" 2>/dev/null && [ "${attempts}" -gt 0 ]; do
+  attempts=$((attempts - 1))
+  sleep 1
+done
+
+if kill -0 "${gateway_pid}" 2>/dev/null; then
+  print_error "Gateway did not exit after SIGTERM. Sending SIGKILL..."
+  kill -9 "${gateway_pid}" >/dev/null 2>&1 || true
+fi
+
+rm -f "${KIRO_GATEWAY_PID_FILE}"
+print_error "Kiro Gateway stopped."

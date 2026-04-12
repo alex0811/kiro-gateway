@@ -45,6 +45,191 @@ _encoding = None
 CLAUDE_CORRECTION_FACTOR = 1.15
 
 
+def _apply_claude_correction(token_count: int, apply_claude_correction: bool) -> int:
+    """
+    Apply the Claude correction factor to a raw token count.
+
+    Args:
+        token_count: Raw token count before Claude correction
+        apply_claude_correction: Whether to apply the Claude correction factor
+
+    Returns:
+        Corrected token count
+    """
+    if apply_claude_correction:
+        return int(token_count * CLAUDE_CORRECTION_FACTOR)
+    return token_count
+
+
+def _normalize_anthropic_value(value: Any) -> Any:
+    """
+    Convert Pydantic models and nested containers into plain Python values.
+
+    Args:
+        value: Value to normalize
+
+    Returns:
+        Plain Python dict/list/scalar structure
+    """
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    if isinstance(value, list):
+        return [_normalize_anthropic_value(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _normalize_anthropic_value(item_value)
+            for key, item_value in value.items()
+        }
+    return value
+
+
+def _stringify_json(value: Any) -> str:
+    """
+    Convert a Python value into a JSON string for token estimation.
+
+    Args:
+        value: Value to stringify
+
+    Returns:
+        JSON string representation
+    """
+    normalized = _normalize_anthropic_value(value)
+    if isinstance(normalized, str):
+        return normalized
+    return json.dumps(normalized, ensure_ascii=False)
+
+
+def _estimate_binary_payload_tokens(
+    source: Dict[str, Any],
+    minimum_tokens: int,
+    bytes_per_token: int,
+) -> int:
+    """
+    Estimate token count for binary payloads such as images and PDFs.
+
+    Args:
+        source: Anthropic source object
+        minimum_tokens: Minimum token estimate for this payload type
+        bytes_per_token: Heuristic divisor to map bytes to tokens
+
+    Returns:
+        Estimated token count
+    """
+    source_type = source.get("type")
+    if source_type == "base64":
+        data = source.get("data", "")
+        if data:
+            estimated_bytes = int(len(data) * 0.75)
+            return max(minimum_tokens, estimated_bytes // bytes_per_token)
+        return minimum_tokens
+
+    if source_type == "url":
+        return minimum_tokens + count_tokens(source.get("url", ""), apply_claude_correction=False)
+
+    return minimum_tokens
+
+
+def _count_anthropic_content_tokens(
+    content: Any,
+    count_thinking_blocks: bool = False,
+) -> int:
+    """
+    Count raw tokens in Anthropic message content blocks.
+
+    Args:
+        content: Anthropic content value (string, block list, nested content)
+        count_thinking_blocks: Whether thinking blocks should count
+
+    Returns:
+        Raw token count without Claude correction
+    """
+    normalized_content = _normalize_anthropic_value(content)
+
+    if normalized_content is None:
+        return 0
+
+    if isinstance(normalized_content, str):
+        return count_tokens(normalized_content, apply_claude_correction=False)
+
+    if isinstance(normalized_content, list):
+        total_tokens = 0
+        for block in normalized_content:
+            total_tokens += _count_anthropic_content_tokens(
+                block,
+                count_thinking_blocks=count_thinking_blocks,
+            )
+        return total_tokens
+
+    if not isinstance(normalized_content, dict):
+        return count_tokens(str(normalized_content), apply_claude_correction=False)
+
+    block_type = normalized_content.get("type")
+
+    if block_type == "text":
+        return count_tokens(normalized_content.get("text", ""), apply_claude_correction=False)
+
+    if block_type == "thinking":
+        if not count_thinking_blocks:
+            return 0
+        thinking_tokens = count_tokens(
+            normalized_content.get("thinking", ""),
+            apply_claude_correction=False,
+        )
+        signature_tokens = count_tokens(
+            normalized_content.get("signature", ""),
+            apply_claude_correction=False,
+        )
+        return thinking_tokens + signature_tokens
+
+    if block_type == "image":
+        source = normalized_content.get("source", {})
+        if isinstance(source, dict):
+            return _estimate_binary_payload_tokens(
+                source=source,
+                minimum_tokens=100,
+                bytes_per_token=64,
+            )
+        return 100
+
+    if block_type == "document":
+        source = normalized_content.get("source", {})
+        if isinstance(source, dict):
+            return _estimate_binary_payload_tokens(
+                source=source,
+                minimum_tokens=300,
+                bytes_per_token=48,
+            )
+        return 300
+
+    if block_type == "tool_use":
+        tool_input = normalized_content.get("input", {})
+        return (
+            4
+            + count_tokens(normalized_content.get("id", ""), apply_claude_correction=False)
+            + count_tokens(normalized_content.get("name", ""), apply_claude_correction=False)
+            + count_tokens(_stringify_json(tool_input), apply_claude_correction=False)
+        )
+
+    if block_type == "tool_result":
+        total_tokens = 4
+        total_tokens += count_tokens(
+            normalized_content.get("tool_use_id", ""),
+            apply_claude_correction=False,
+        )
+        total_tokens += _count_anthropic_content_tokens(
+            normalized_content.get("content"),
+            count_thinking_blocks=False,
+        )
+        if normalized_content.get("is_error") is not None:
+            total_tokens += count_tokens(
+                str(normalized_content.get("is_error")).lower(),
+                apply_claude_correction=False,
+            )
+        return total_tokens
+
+    return count_tokens(_stringify_json(normalized_content), apply_claude_correction=False)
+
+
 def _get_encoding():
     """
     Lazy initialization of tokenizer.
@@ -205,9 +390,7 @@ def count_message_tokens(messages: List[Dict[str, Any]], apply_claude_correction
     total_tokens += 3
     
     # Apply correction to total count
-    if apply_claude_correction:
-        return int(total_tokens * CLAUDE_CORRECTION_FACTOR)
-    return total_tokens
+    return _apply_claude_correction(total_tokens, apply_claude_correction)
 
 
 def count_tools_tokens(tools: Optional[List[Dict[str, Any]]], apply_claude_correction: bool = True) -> int:
@@ -248,9 +431,7 @@ def count_tools_tokens(tools: Optional[List[Dict[str, Any]]], apply_claude_corre
             total_tokens += count_tokens(params_str, apply_claude_correction=False)
     
     # Apply correction to total count
-    if apply_claude_correction:
-        return int(total_tokens * CLAUDE_CORRECTION_FACTOR)
-    return total_tokens
+    return _apply_claude_correction(total_tokens, apply_claude_correction)
 
 
 def count_system_tokens(system_prompt: Optional[Any], apply_claude_correction: bool = True) -> int:
@@ -324,4 +505,186 @@ def estimate_request_tokens(
         "tools_tokens": tools_tokens,
         "system_tokens": system_tokens,
         "total_tokens": messages_tokens + tools_tokens + system_tokens
+    }
+
+
+def count_anthropic_message_tokens(
+    messages: List[Dict[str, Any]],
+    apply_claude_correction: bool = True,
+) -> int:
+    """
+    Count tokens in Anthropic-format messages.
+
+    Rules implemented:
+    - Standard message framing tokens are included
+    - Previous assistant thinking blocks are ignored
+    - Thinking blocks in the latest assistant turn are counted
+    - Tool use / tool result payloads are counted from their structured content
+
+    Args:
+        messages: List of Anthropic-format messages
+        apply_claude_correction: Apply the Claude correction factor
+
+    Returns:
+        Approximate number of tokens
+    """
+    normalized_messages = _normalize_anthropic_value(messages)
+    if not normalized_messages:
+        return 0
+
+    total_tokens = 0
+    for index, message in enumerate(normalized_messages):
+        if not isinstance(message, dict):
+            total_tokens += count_tokens(str(message), apply_claude_correction=False)
+            continue
+
+        total_tokens += 4
+
+        role = message.get("role", "")
+        total_tokens += count_tokens(role, apply_claude_correction=False)
+
+        total_tokens += _count_anthropic_content_tokens(
+            message.get("content"),
+            count_thinking_blocks=(
+                role == "assistant" and index == len(normalized_messages) - 1
+            ),
+        )
+
+    total_tokens += 3
+    return _apply_claude_correction(total_tokens, apply_claude_correction)
+
+
+def count_anthropic_tools_tokens(
+    tools: Optional[List[Dict[str, Any]]],
+    apply_claude_correction: bool = True,
+) -> int:
+    """
+    Count tokens in Anthropic-format tool definitions.
+
+    Args:
+        tools: List of Anthropic-format tools
+        apply_claude_correction: Apply the Claude correction factor
+
+    Returns:
+        Approximate number of tokens
+    """
+    normalized_tools = _normalize_anthropic_value(tools)
+    if not normalized_tools:
+        return 0
+
+    total_tokens = 0
+    for tool in normalized_tools:
+        total_tokens += 4
+
+        if not isinstance(tool, dict):
+            total_tokens += count_tokens(str(tool), apply_claude_correction=False)
+            continue
+
+        total_tokens += count_tokens(tool.get("name", ""), apply_claude_correction=False)
+        total_tokens += count_tokens(
+            tool.get("description", ""),
+            apply_claude_correction=False,
+        )
+
+        input_schema = tool.get("input_schema")
+        if input_schema is not None:
+            total_tokens += count_tokens(
+                _stringify_json(input_schema),
+                apply_claude_correction=False,
+            )
+
+        extra_fields = {
+            key: value
+            for key, value in tool.items()
+            if key not in {"name", "description", "input_schema"}
+        }
+        if extra_fields:
+            total_tokens += count_tokens(
+                _stringify_json(extra_fields),
+                apply_claude_correction=False,
+            )
+
+    return _apply_claude_correction(total_tokens, apply_claude_correction)
+
+
+def count_anthropic_system_tokens(
+    system_prompt: Optional[Any],
+    apply_claude_correction: bool = True,
+) -> int:
+    """
+    Count tokens in Anthropic-format system prompt content.
+
+    Args:
+        system_prompt: System prompt string or list of content blocks
+        apply_claude_correction: Apply the Claude correction factor
+
+    Returns:
+        Approximate number of tokens
+    """
+    normalized_system = _normalize_anthropic_value(system_prompt)
+    if not normalized_system:
+        return 0
+
+    if isinstance(normalized_system, str):
+        return count_tokens(
+            normalized_system,
+            apply_claude_correction=apply_claude_correction,
+        )
+
+    if isinstance(normalized_system, list):
+        total_tokens = 0
+        for block in normalized_system:
+            if isinstance(block, dict) and block.get("type") == "text":
+                total_tokens += count_tokens(
+                    block.get("text", ""),
+                    apply_claude_correction=False,
+                )
+            else:
+                total_tokens += count_tokens(
+                    _stringify_json(block),
+                    apply_claude_correction=False,
+                )
+        return _apply_claude_correction(total_tokens, apply_claude_correction)
+
+    return count_tokens(
+        _stringify_json(normalized_system),
+        apply_claude_correction=apply_claude_correction,
+    )
+
+
+def estimate_anthropic_request_tokens(
+    messages: List[Dict[str, Any]],
+    tools: Optional[List[Dict[str, Any]]] = None,
+    system_prompt: Optional[Any] = None,
+) -> Dict[str, int]:
+    """
+    Estimate total input tokens for an Anthropic count_tokens request.
+
+    The estimate is intentionally local and approximate. It mirrors the gateway's
+    existing tokenizer strategy and avoids external dependencies on Anthropic APIs.
+
+    Args:
+        messages: Anthropic-format messages
+        tools: Anthropic-format tools
+        system_prompt: Anthropic-format system prompt
+
+    Returns:
+        Dictionary with token breakdown and total
+    """
+    messages_tokens = count_anthropic_message_tokens(messages)
+    tools_tokens = count_anthropic_tools_tokens(tools)
+    system_tokens = count_anthropic_system_tokens(system_prompt)
+
+    total_tokens = messages_tokens + tools_tokens + system_tokens
+    logger.debug(
+        "[Tokenizer] Anthropic request estimate: "
+        f"messages={messages_tokens}, tools={tools_tokens}, "
+        f"system={system_tokens}, total={total_tokens}"
+    )
+
+    return {
+        "messages_tokens": messages_tokens,
+        "tools_tokens": tools_tokens,
+        "system_tokens": system_tokens,
+        "total_tokens": total_tokens,
     }

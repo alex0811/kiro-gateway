@@ -38,9 +38,11 @@ from kiro.models_anthropic import (
     # Request models
     SystemContentBlock,
     AnthropicMessagesRequest,
+    AnthropicCountTokensRequest,
     # Response models
     AnthropicUsage,
     AnthropicMessagesResponse,
+    AnthropicCountTokensResponse,
     # Streaming models
     MessageStartEvent,
     ContentBlockStartEvent,
@@ -1353,6 +1355,95 @@ class TestSystemContentBlock:
         
         print(f"ValidationError raised: {exc_info.value}")
         assert "text" in str(exc_info.value)
+
+
+# ==================================================================================================
+# Tests for AnthropicCountTokensRequest / Response
+# ==================================================================================================
+
+class TestAnthropicCountTokensRequest:
+    """Tests for AnthropicCountTokensRequest Pydantic model."""
+
+    def test_valid_request_without_max_tokens(self):
+        """
+        What it does: Verifies count_tokens requests work without max_tokens.
+        Purpose: Ensure the schema matches Anthropic's count_tokens endpoint.
+        """
+        print("Setup: Creating AnthropicCountTokensRequest without max_tokens...")
+        request = AnthropicCountTokensRequest(
+            model="claude-sonnet-4-5",
+            system="You are a helpful assistant.",
+            messages=[{"role": "user", "content": "Hello"}],
+            tools=[
+                {
+                    "name": "get_weather",
+                    "description": "Get weather",
+                    "input_schema": {"type": "object", "properties": {}},
+                }
+            ],
+        )
+
+        print(f"Result: {request}")
+        assert request.model == "claude-sonnet-4-5"
+        assert len(request.messages) == 1
+        assert request.system == "You are a helpful assistant."
+
+    def test_accepts_forward_compatible_document_block(self):
+        """
+        What it does: Verifies document content blocks are accepted.
+        Purpose: Keep count_tokens compatible with Anthropic's broader input schema.
+        """
+        print("Setup: Creating AnthropicCountTokensRequest with document block...")
+        request = AnthropicCountTokensRequest(
+            model="claude-sonnet-4-5",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "document",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "application/pdf",
+                                "data": "JVBERi0xLjQK",
+                            },
+                        },
+                        {"type": "text", "text": "Summarize this PDF"},
+                    ],
+                }
+            ],
+        )
+
+        print(f"Result content: {request.messages[0].content}")
+        assert request.messages[0].content[0]["type"] == "document"
+
+
+class TestAnthropicCountTokensResponse:
+    """Tests for AnthropicCountTokensResponse Pydantic model."""
+
+    def test_valid_response(self):
+        """
+        What it does: Verifies creation of valid count_tokens response.
+        Purpose: Ensure response schema matches Anthropic format.
+        """
+        print("Setup: Creating AnthropicCountTokensResponse...")
+        response = AnthropicCountTokensResponse(input_tokens=123)
+
+        print(f"Result: {response}")
+        assert response.input_tokens == 123
+
+    def test_requires_input_tokens(self):
+        """
+        What it does: Verifies input_tokens is required.
+        Purpose: Ensure invalid count_tokens responses fail validation.
+        """
+        print("Setup: Creating AnthropicCountTokensResponse without input_tokens...")
+
+        with pytest.raises(ValidationError) as exc_info:
+            AnthropicCountTokensResponse()
+
+        print(f"ValidationError raised: {exc_info.value}")
+        assert "input_tokens" in str(exc_info.value)
 
 
 # ==================================================================================================

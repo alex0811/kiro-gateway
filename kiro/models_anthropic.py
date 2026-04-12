@@ -340,27 +340,39 @@ class AnthropicMessagesRequest(BaseModel):
     model_config = {"extra": "allow"}
 
 
+class AnthropicCountTokensMessage(BaseModel):
+    """
+    Message in Anthropic count_tokens format.
+
+    The token counting endpoint accepts the same structured message inputs as
+    the Messages API, including forward-compatible content block dictionaries
+    such as images, PDFs, and future beta block types.
+    """
+
+    role: Literal["user", "assistant"]
+    content: Union[str, List[Dict[str, Any]]]
+
+    model_config = {"extra": "allow"}
+
+
 class AnthropicCountTokensRequest(BaseModel):
     """
-    Request to Anthropic Count Tokens API (/v1/messages/count_tokens).
-    
-    Similar to AnthropicMessagesRequest but without generation parameters.
-    Used to estimate token count before making actual request.
-    
+    Request to Anthropic Messages Count Tokens API (/v1/messages/count_tokens).
+
     Attributes:
         model: Model ID (e.g., "claude-sonnet-4-5")
-        messages: List of conversation messages
-        system: System prompt (optional, string or list of content blocks)
-        tools: List of available tools
+        messages: List of conversation messages to estimate
+        system: Optional system prompt
+        tools: Optional tool definitions in Anthropic format
+        thinking: Optional thinking configuration for extended thinking requests
     """
-    
+
     model: str
-    messages: List[AnthropicMessage] = Field(min_length=1)
-    
-    # Optional parameters - only those that affect token count
-    system: Optional[SystemPrompt] = None
-    tools: Optional[List[AnthropicTool]] = None
-    
+    messages: List[AnthropicCountTokensMessage] = Field(min_length=1)
+    system: Optional[Union[str, List[Dict[str, Any]]]] = None
+    tools: Optional[List[Dict[str, Any]]] = None
+    thinking: Optional[Dict[str, Any]] = None
+
     model_config = {"extra": "allow"}
 
 
@@ -413,6 +425,17 @@ class AnthropicMessagesResponse(BaseModel):
     ] = None
     stop_sequence: Optional[str] = None
     usage: AnthropicUsage
+
+
+class AnthropicCountTokensResponse(BaseModel):
+    """
+    Response from Anthropic Messages Count Tokens API.
+
+    Attributes:
+        input_tokens: Estimated number of input tokens for the request
+    """
+
+    input_tokens: int
 
 
 # ==================================================================================================

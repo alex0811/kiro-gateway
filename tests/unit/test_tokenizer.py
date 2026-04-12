@@ -20,7 +20,11 @@ from kiro.tokenizer import (
     count_message_tokens,
     count_tools_tokens,
     count_system_tokens,
+    count_anthropic_message_tokens,
+    count_anthropic_tools_tokens,
+    count_anthropic_system_tokens,
     estimate_request_tokens,
+    estimate_anthropic_request_tokens,
     CLAUDE_CORRECTION_FACTOR,
     _get_encoding
 )
@@ -1055,5 +1059,156 @@ class TestTokenizerIntegration:
         
         # All results should be identical
         assert len(set(results)) == 1, "Results should be consistent"
-    
+
+
+class TestAnthropicTokenizer:
+    """Тесты для Anthropic-специфичного подсчёта токенов."""
+
+    def test_estimates_anthropic_request_with_system_and_tools(self):
+        """
+        Что он делает: Проверяет оценку Anthropic-запроса с system и tools.
+        Цель: Убедиться, что breakdown и total считаются локально.
+        """
+        print("Тест: Anthropic request с system и tools...")
+
+        messages = [{"role": "user", "content": "Hello, Claude"}]
+        tools = [
+            {
+                "name": "get_weather",
+                "description": "Get weather for a location",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"location": {"type": "string"}},
+                    "required": ["location"],
+                },
+            }
+        ]
+
+        result = estimate_anthropic_request_tokens(
+            messages=messages,
+            tools=tools,
+            system_prompt="You are a scientist",
+        )
+        print(f"Результат: {result}")
+
+        assert result["messages_tokens"] > 0
+        assert result["tools_tokens"] > 0
+        assert result["system_tokens"] > 0
+        assert result["total_tokens"] == (
+            result["messages_tokens"] + result["tools_tokens"] + result["system_tokens"]
+        )
+
+    def test_ignores_previous_assistant_thinking_blocks(self):
+        """
+        Что он делает: Проверяет, что thinking из прошлых assistant-turn не учитывается.
+        Цель: Соответствовать поведению Anthropic count_tokens.
+        """
+        print("Тест: Игнорирование прошлых thinking block...")
+
+        messages_with_short_thinking = [
+            {"role": "user", "content": "Question"},
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "thinking", "thinking": "short", "signature": "sig"},
+                    {"type": "text", "text": "Answer"},
+                ],
+            },
+            {"role": "user", "content": "Follow up"},
+        ]
+        messages_with_long_thinking = [
+            {"role": "user", "content": "Question"},
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "thinking", "thinking": "very long thinking " * 100, "signature": "sig"},
+                    {"type": "text", "text": "Answer"},
+                ],
+            },
+            {"role": "user", "content": "Follow up"},
+        ]
+
+        short_result = count_anthropic_message_tokens(messages_with_short_thinking)
+        long_result = count_anthropic_message_tokens(messages_with_long_thinking)
+
+        print(f"Short thinking result: {short_result}")
+        print(f"Long thinking result: {long_result}")
+        assert short_result == long_result
+
+    def test_counts_last_assistant_thinking_blocks(self):
+        """
+        Что он делает: Проверяет, что thinking в последнем assistant-turn учитывается.
+        Цель: Не занижать оценку для текущего assistant prefill.
+        """
+        print("Тест: Подсчёт thinking в последнем assistant-turn...")
+
+        messages_without_thinking = [
+            {"role": "user", "content": "Question"},
+            {"role": "assistant", "content": [{"type": "text", "text": "Answer"}]},
+        ]
+        messages_with_thinking = [
+            {"role": "user", "content": "Question"},
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "thinking", "thinking": "Reasoning step by step", "signature": "sig"},
+                    {"type": "text", "text": "Answer"},
+                ],
+            },
+        ]
+
+        base_result = count_anthropic_message_tokens(messages_without_thinking)
+        thinking_result = count_anthropic_message_tokens(messages_with_thinking)
+
+        print(f"Без thinking: {base_result}")
+        print(f"С thinking: {thinking_result}")
+        assert thinking_result > base_result
+
+    def test_handles_binary_content_blocks(self):
+        """
+        Что он делает: Проверяет обработку image и document блоков.
+        Цель: Убедиться, что count_tokens endpoint не падает на бинарном контенте.
+        """
+        print("Тест: Бинарные content block...")
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": "aGVsbG8=",
+                        },
+                    },
+                    {
+                        "type": "document",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "application/pdf",
+                            "data": "JVBERi0xLjQK",
+                        },
+                    },
+                    {"type": "text", "text": "Describe the attachments"},
+                ],
+            }
+        ]
+
+        message_tokens = count_anthropic_message_tokens(messages)
+        system_tokens = count_anthropic_system_tokens(
+            [{"type": "text", "text": "System prompt"}]
+        )
+        tool_tokens = count_anthropic_tools_tokens(
+            [{"name": "tool", "description": "desc", "input_schema": {"type": "object"}}]
+        )
+
+        print(f"Message tokens: {message_tokens}")
+        print(f"System tokens: {system_tokens}")
+        print(f"Tool tokens: {tool_tokens}")
+
+        assert message_tokens > 0
+        assert system_tokens > 0
+        assert tool_tokens > 0
     

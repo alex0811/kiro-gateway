@@ -20,7 +20,9 @@
 """
 FastAPI routes for Anthropic Messages API.
 
-Contains the /v1/messages endpoint compatible with Anthropic's Messages API.
+Contains Anthropic-compatible endpoints:
+- /v1/messages
+- /v1/messages/count_tokens
 
 Reference: https://docs.anthropic.com/en/api/messages
 """
@@ -36,6 +38,8 @@ from loguru import logger
 
 from kiro.config import PROXY_API_KEY
 from kiro.models_anthropic import (
+    AnthropicCountTokensRequest,
+    AnthropicCountTokensResponse,
     AnthropicMessagesRequest,
     AnthropicCountTokensRequest,
     AnthropicMessagesResponse,
@@ -52,7 +56,7 @@ from kiro.streaming_anthropic import (
 )
 from kiro.http_client import KiroHttpClient
 from kiro.utils import generate_conversation_id
-from kiro.tokenizer import estimate_request_tokens
+from kiro.tokenizer import estimate_request_tokens, estimate_anthropic_request_tokens
 from kiro.config import WEB_SEARCH_ENABLED
 from kiro.mcp_tools import handle_native_web_search
 
@@ -120,7 +124,8 @@ router = APIRouter(tags=["Anthropic API"])
 async def messages(
     request: Request,
     request_data: AnthropicMessagesRequest,
-    anthropic_version: Optional[str] = Header(None, alias="anthropic-version")
+    anthropic_version: Optional[str] = Header(None, alias="anthropic-version"),
+    anthropic_beta: Optional[str] = Header(None, alias="anthropic-beta"),
 ):
     """
     Anthropic Messages API endpoint.
@@ -149,6 +154,8 @@ async def messages(
     
     if anthropic_version:
         logger.debug(f"Anthropic-Version header: {anthropic_version}")
+    if anthropic_beta:
+        logger.debug(f"Anthropic-Beta header: {anthropic_beta}")
     
     # Note: prepare_new_request() and log_request_body() are now called by DebugLoggerMiddleware
     # This ensures debug logging works even for requests that fail Pydantic validation (422 errors)
@@ -909,54 +916,53 @@ async def messages(
         )
 
 
-@router.post("/v1/messages/count_tokens", dependencies=[Depends(verify_anthropic_api_key)])
-async def count_tokens_endpoint(
-    request: Request,
+@router.post(
+    "/v1/messages/count_tokens",
+    response_model=AnthropicCountTokensResponse,
+    dependencies=[Depends(verify_anthropic_api_key)],
+)
+async def count_message_tokens_endpoint(
     request_data: AnthropicCountTokensRequest,
-):
+    anthropic_version: Optional[str] = Header(None, alias="anthropic-version"),
+    anthropic_beta: Optional[str] = Header(None, alias="anthropic-beta"),
+) -> AnthropicCountTokensResponse:
     """
-    Anthropic Count Tokens API endpoint.
-    
-    Returns estimated token count for the given request payload.
-    Used by Claude Code to decide when to trigger conversation compaction.
-    
-    Uses the same fallback estimation as Anthropic streaming (message_start event),
-    since Kiro API only provides accurate token counts after request completion.
-    This endpoint is called BEFORE the actual request, so we cannot use Kiro's
-    contextUsagePercentage (which is only available after generation completes).
-    
+    Anthropic Messages Count Tokens API endpoint.
+
+    Compatible with Anthropic's /v1/messages/count_tokens endpoint.
+    Returns an approximate local estimate of input tokens for the provided
+    Anthropic-format request payload.
+
     Args:
-        request: FastAPI Request for accessing app.state
-        request_data: Request in Anthropic MessagesRequest format
-    
+        request_data: Count tokens request in Anthropic format
+        anthropic_version: Anthropic API version header (optional)
+        anthropic_beta: Anthropic beta feature header (optional)
+
     Returns:
-        JSONResponse with {"input_tokens": int}
-    
-    Raises:
-        HTTPException: 401 if authentication fails (handled by dependency)
+        Estimated number of input tokens in Anthropic format
     """
-    logger.info(f"Request to /v1/messages/count_tokens (model={request_data.model}, messages={len(request_data.messages)})")
-    
-    # Prepare data for tokenizer (same format as streaming message_start)
-    messages_for_tokenizer = [msg.model_dump() for msg in request_data.messages]
-    tools_for_tokenizer = [tool.model_dump() for tool in request_data.tools] if request_data.tools else None
-    
-    # Handle system prompt (can be string or list of content blocks)
-    if isinstance(request_data.system, list):
-        system_for_tokenizer = [b.model_dump() if hasattr(b, "model_dump") else b for b in request_data.system]
-    else:
-        system_for_tokenizer = request_data.system
-    
-    # Use the SAME estimation logic as Anthropic streaming message_start
-    request_token_stats = estimate_request_tokens(
-        messages=messages_for_tokenizer,
-        tools=tools_for_tokenizer,
-        system_prompt=system_for_tokenizer,
-        apply_claude_correction=True  # CRITICAL: Enable correction for Claude models
+    logger.info(f"Request to /v1/messages/count_tokens (model={request_data.model})")
+
+    if anthropic_version:
+        logger.debug(f"Anthropic-Version header: {anthropic_version}")
+    if anthropic_beta:
+        logger.debug(f"Anthropic-Beta header: {anthropic_beta}")
+
+    token_estimate = estimate_anthropic_request_tokens(
+        messages=request_data.messages,
+        tools=request_data.tools,
+        system_prompt=request_data.system,
     )
-    
-    input_tokens = request_token_stats["total_tokens"]
-    
-    logger.info(f"Token count estimate: {input_tokens} tokens")
-    
-    return JSONResponse(content={"input_tokens": input_tokens})
+
+    logger.info(
+        "Anthropic count_tokens estimate completed: "
+        f"input_tokens={token_estimate['total_tokens']}"
+    )
+    logger.debug(
+        "Anthropic count_tokens breakdown: "
+        f"messages={token_estimate['messages_tokens']}, "
+        f"tools={token_estimate['tools_tokens']}, "
+        f"system={token_estimate['system_tokens']}"
+    )
+
+    return AnthropicCountTokensResponse(input_tokens=token_estimate["total_tokens"])

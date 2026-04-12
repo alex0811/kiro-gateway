@@ -1,0 +1,57 @@
+#!/usr/bin/env sh
+
+set -eu
+
+SELF_PATH="$0"
+while [ -h "${SELF_PATH}" ]; do
+  SELF_DIR="$(CDPATH= cd -- "$(dirname -- "${SELF_PATH}")" && pwd)"
+  LINK_TARGET="$(readlink "${SELF_PATH}")"
+  case "${LINK_TARGET}" in
+    /*) SELF_PATH="${LINK_TARGET}" ;;
+    *) SELF_PATH="${SELF_DIR}/${LINK_TARGET}" ;;
+  esac
+done
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${SELF_PATH}")" && pwd)"
+
+stop_managed_gateway() {
+  if [ "${CLAUDE_KIRO_STARTED_GATEWAY:-0}" -eq 1 ] && [ -n "${CLAUDE_KIRO_GATEWAY_PID:-}" ]; then
+    kill "${CLAUDE_KIRO_GATEWAY_PID}" >/dev/null 2>&1 || true
+    wait "${CLAUDE_KIRO_GATEWAY_PID}" 2>/dev/null || true
+  fi
+}
+
+. "${SCRIPT_DIR}/_kiro_gateway_common.sh"
+
+kiro_gateway_init_env "$0"
+require_command curl
+require_command claude
+
+CLAUDE_KIRO_STARTED_GATEWAY=0
+CLAUDE_KIRO_GATEWAY_PID=""
+
+if ! gateway_is_healthy; then
+  print_error "Starting Kiro Gateway on ${ANTHROPIC_BASE_URL} ..."
+  CLAUDE_KIRO_GATEWAY_PID="$(start_gateway_process)"
+  CLAUDE_KIRO_STARTED_GATEWAY=1
+  export CLAUDE_KIRO_GATEWAY_PID
+  export CLAUDE_KIRO_STARTED_GATEWAY
+  trap stop_managed_gateway EXIT INT TERM
+
+  if ! wait_for_gateway; then
+    print_error "Kiro Gateway failed to become healthy."
+    print_error "Log: ${KIRO_GATEWAY_LOG_FILE}"
+    if [ -f "${KIRO_GATEWAY_LOG_FILE}" ]; then
+      tail -n 40 "${KIRO_GATEWAY_LOG_FILE}" >&2 || true
+    fi
+    exit 1
+  fi
+
+  print_error "Kiro Gateway is ready."
+fi
+
+set +e
+"$(command -v claude)" "$@"
+CLAUDE_EXIT_CODE=$?
+set -e
+
+exit "${CLAUDE_EXIT_CODE}"

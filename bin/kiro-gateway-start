@@ -1,0 +1,46 @@
+#!/usr/bin/env sh
+
+set -eu
+
+SELF_PATH="$0"
+while [ -h "${SELF_PATH}" ]; do
+  SELF_DIR="$(CDPATH= cd -- "$(dirname -- "${SELF_PATH}")" && pwd)"
+  LINK_TARGET="$(readlink "${SELF_PATH}")"
+  case "${LINK_TARGET}" in
+    /*) SELF_PATH="${LINK_TARGET}" ;;
+    *) SELF_PATH="${SELF_DIR}/${LINK_TARGET}" ;;
+  esac
+done
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${SELF_PATH}")" && pwd)"
+
+. "${SCRIPT_DIR}/_kiro_gateway_common.sh"
+
+kiro_gateway_init_env "$0"
+require_command curl
+
+if gateway_is_healthy; then
+  print_error "Kiro Gateway is already running on ${ANTHROPIC_BASE_URL}"
+  if running_pid="$(find_running_gateway_pid)"; then
+    print_error "PID: ${running_pid}"
+  fi
+  print_error "Health: $(gateway_health_url)"
+  exit 0
+fi
+
+print_error "Starting Kiro Gateway on ${ANTHROPIC_BASE_URL} ..."
+started_pid="$(start_gateway_process)"
+
+if ! wait_for_gateway; then
+  print_error "Kiro Gateway failed to become healthy."
+  print_error "PID file: ${KIRO_GATEWAY_PID_FILE}"
+  print_error "Log: ${KIRO_GATEWAY_LOG_FILE}"
+  if [ -f "${KIRO_GATEWAY_LOG_FILE}" ]; then
+    tail -n 40 "${KIRO_GATEWAY_LOG_FILE}" >&2 || true
+  fi
+  exit 1
+fi
+
+print_error "Kiro Gateway is ready."
+printf '%s\n' "PID: ${started_pid}"
+printf '%s\n' "Health: $(gateway_health_url)"
+printf '%s\n' "Log: ${KIRO_GATEWAY_LOG_FILE}"
