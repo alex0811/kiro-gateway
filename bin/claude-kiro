@@ -26,6 +26,35 @@ kiro_gateway_init_env "$0"
 require_command curl
 require_command claude
 
+# ---------------------------------------------------------------------------
+# Detect conflicting ANTHROPIC_BASE_URL in Claude Code settings.json
+# cc-switch (or similar tools) may write env overrides that take precedence
+# over the environment variables exported by this script.
+# ---------------------------------------------------------------------------
+CLAUDE_SETTINGS_FILE="${HOME}/.claude/settings.json"
+if [ -f "${CLAUDE_SETTINGS_FILE}" ]; then
+  # Extract ANTHROPIC_BASE_URL value from settings.json (lightweight, no jq needed)
+  settings_base_url="$(
+    sed -n 's/.*"ANTHROPIC_BASE_URL"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+      "${CLAUDE_SETTINGS_FILE}" | head -n 1
+  )"
+
+  if [ -n "${settings_base_url}" ] && [ "${settings_base_url}" != "${ANTHROPIC_BASE_URL}" ]; then
+    print_error ""
+    print_error "⚠️  检测到代理冲突！"
+    print_error ""
+    print_error "   settings.json 中:  ANTHROPIC_BASE_URL = ${settings_base_url}"
+    print_error "   claude-kiro 需要:  ANTHROPIC_BASE_URL = ${ANTHROPIC_BASE_URL}"
+    print_error ""
+    print_error "   Claude Code 会优先使用 ~/.claude/settings.json 中的 env 配置，"
+    print_error "   导致请求被转发到其他代理，kiro-gateway 无法收到任何请求。"
+    print_error ""
+    print_error "   请先关闭冲突的代理（如 cc-switch off），或手动删除"
+    print_error "   ~/.claude/settings.json 中的 ANTHROPIC_BASE_URL 配置项。"
+    exit 1
+  fi
+fi
+
 CLAUDE_KIRO_STARTED_GATEWAY=0
 CLAUDE_KIRO_GATEWAY_PID=""
 
