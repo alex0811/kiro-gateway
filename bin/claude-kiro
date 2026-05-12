@@ -70,7 +70,7 @@ if ! gateway_is_healthy; then
     print_error "Kiro Gateway failed to become healthy."
     print_error "Log: ${KIRO_GATEWAY_LOG_FILE}"
     if [ -f "${KIRO_GATEWAY_LOG_FILE}" ]; then
-      tail -n 40 "${KIRO_GATEWAY_LOG_FILE}" >&2 || true
+      tail -n 80 "${KIRO_GATEWAY_LOG_FILE}" >&2 || true
     fi
     exit 1
   fi
