@@ -80,7 +80,7 @@ from kiro.config import (
     ACCOUNTS_STATE_FILE,
     _warn_timeout_configuration,
 )
-from kiro.auth import KiroAuthManager
+from kiro.auth import KiroAuthManager, get_startup_failure_guidance
 from kiro.cache import ModelInfoCache
 from kiro.model_resolver import ModelResolver
 from kiro.account_manager import AccountManager
@@ -472,6 +472,23 @@ async def lifespan(app: FastAPI):
     
     if not all_accounts:
         logger.error("No accounts configured in credentials.json")
+        logger.error(
+            "\n"
+            "╔══════════════════════════════════════════════════════════════╗\n"
+            "║  ⚠️  未找到任何账号配置 (No Accounts Configured)            ║\n"
+            "╠══════════════════════════════════════════════════════════════╣\n"
+            "║                                                            ║\n"
+            "║  请在 credentials.json 中配置至少一个账号，                 ║\n"
+            "║  或在 .env 文件中设置以下任一变量:                          ║\n"
+            "║                                                            ║\n"
+            "║  • KIRO_CREDS_FILE  (Kiro IDE 凭证文件路径)                ║\n"
+            "║  • REFRESH_TOKEN    (刷新令牌)                             ║\n"
+            "║  • KIRO_CLI_DB_FILE (kiro-cli 数据库路径)                  ║\n"
+            "║                                                            ║\n"
+            "║  参考 .env.example 了解详细配置说明。                       ║\n"
+            "║                                                            ║\n"
+            "╚══════════════════════════════════════════════════════════════╝"
+        )
         raise RuntimeError("No accounts configured in credentials.json")
     
     # Determine start index from state.json
@@ -497,6 +514,7 @@ async def lifespan(app: FastAPI):
     
     if not initialized:
         logger.error("Failed to initialize any account. Check your credentials.")
+        logger.error(get_startup_failure_guidance())
         raise RuntimeError("Failed to initialize any account")
     
     # Save initial state

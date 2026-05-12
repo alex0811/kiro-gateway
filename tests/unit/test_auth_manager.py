@@ -12,7 +12,13 @@ from datetime import datetime, timezone, timedelta
 from unittest.mock import AsyncMock, Mock, patch
 import httpx
 
-from kiro.auth import KiroAuthManager, AuthType
+from kiro.auth import (
+    KiroAuthManager,
+    AuthType,
+    _get_auth_error_guidance,
+    _get_fix_steps,
+    get_startup_failure_guidance,
+)
 from kiro.config import TOKEN_REFRESH_THRESHOLD, get_aws_sso_oidc_url
 
 
@@ -4251,3 +4257,117 @@ class TestAPIRegionPriorityHierarchy:
         print(f"Result: api_host={manager5._api_host}")
         assert "ap-south-1" in manager5._api_host
 
+
+
+class TestAuthErrorGuidance:
+    """Tests for Chinese auth error guidance messages."""
+
+    def test_invalid_grant_kiro_ide(self):
+        """
+        What it does: Verifies invalid_grant error produces Chinese guidance for Kiro IDE users.
+        Purpose: Ensure Kiro IDE users get correct re-login instructions.
+        """
+        result = _get_auth_error_guidance("invalid_grant", AuthType.KIRO_DESKTOP, None)
+        assert result is not None
+        assert "认证令牌已过期" in result
+        assert "打开 Kiro IDE" in result
+        assert "python main.py" in result
+
+    def test_invalid_grant_kiro_cli_sqlite(self):
+        """
+        What it does: Verifies invalid_grant error produces kiro-cli guidance when sqlite_db is set.
+        Purpose: Ensure kiro-cli users get correct login command instructions.
+        """
+        result = _get_auth_error_guidance("invalid_grant", AuthType.AWS_SSO_OIDC, "/path/to/db")
+        assert result is not None
+        assert "认证令牌已过期" in result
+        assert "kiro-cli login" in result
+
+    def test_invalid_grant_aws_sso_no_sqlite(self):
+        """
+        What it does: Verifies AWS SSO OIDC without sqlite still gets kiro-cli guidance.
+        Purpose: Ensure AWS SSO users get correct instructions even without sqlite.
+        """
+        result = _get_auth_error_guidance("invalid_grant", AuthType.AWS_SSO_OIDC, None)
+        assert result is not None
+        assert "kiro-cli login" in result
+
+    def test_unauthorized_client(self):
+        """
+        What it does: Verifies unauthorized_client error produces correct Chinese guidance.
+        Purpose: Ensure client credential errors have actionable messages.
+        """
+        result = _get_auth_error_guidance("unauthorized_client", AuthType.AWS_SSO_OIDC, None)
+        assert result is not None
+        assert "客户端凭证无效" in result
+        assert "clientId" in result
+
+    def test_expired_token(self):
+        """
+        What it does: Verifies expired_token error produces correct Chinese guidance.
+        Purpose: Ensure token expiration errors have actionable messages.
+        """
+        result = _get_auth_error_guidance("expired_token", AuthType.KIRO_DESKTOP, None)
+        assert result is not None
+        assert "令牌已过期" in result
+
+    def test_kiro_desktop_refresh_failed(self):
+        """
+        What it does: Verifies Kiro Desktop refresh failure produces Chinese guidance.
+        Purpose: Ensure desktop auth failures have specific instructions.
+        """
+        result = _get_auth_error_guidance("kiro_desktop_refresh_failed", AuthType.KIRO_DESKTOP, None)
+        assert result is not None
+        assert "Kiro 认证刷新失败" in result
+        assert "打开 Kiro IDE" in result
+
+    def test_unknown_error_returns_none(self):
+        """
+        What it does: Verifies unknown error codes return None (no guidance).
+        Purpose: Ensure we don't show misleading guidance for unrecognized errors.
+        """
+        result = _get_auth_error_guidance("some_random_error", AuthType.KIRO_DESKTOP, None)
+        assert result is None
+
+    def test_startup_failure_guidance(self):
+        """
+        What it does: Verifies startup failure guidance contains comprehensive instructions.
+        Purpose: Ensure all auth methods are covered in startup failure message.
+        """
+        result = get_startup_failure_guidance()
+        assert "所有账号初始化失败" in result
+        assert "Kiro IDE" in result
+        assert "kiro-cli login" in result
+        assert "REFRESH_TOKEN" in result
+        assert "VPN_PROXY_URL" in result
+        assert "python main.py" in result
+        assert "github.com/jwadow/kiro-gateway/issues" in result
+
+
+class TestGetFixSteps:
+    """Tests for _get_fix_steps auth-type routing."""
+
+    def test_sqlite_db_gets_kiro_cli_steps(self):
+        """
+        What it does: Verifies sqlite_db presence routes to kiro-cli fix steps.
+        Purpose: SQLite implies kiro-cli usage regardless of auth type.
+        """
+        result = _get_fix_steps(AuthType.KIRO_DESKTOP, "/path/to/db")
+        assert "kiro-cli login" in result
+
+    def test_aws_sso_no_sqlite_gets_kiro_cli_steps(self):
+        """
+        What it does: Verifies AWS SSO OIDC without sqlite still gets kiro-cli steps.
+        Purpose: AWS SSO OIDC is used by kiro-cli.
+        """
+        result = _get_fix_steps(AuthType.AWS_SSO_OIDC, None)
+        assert "kiro-cli login" in result
+
+    def test_kiro_desktop_no_sqlite_gets_ide_steps(self):
+        """
+        What it does: Verifies Kiro Desktop without sqlite gets IDE fix steps.
+        Purpose: Desktop auth users should be guided to re-open Kiro IDE.
+        """
+        result = _get_fix_steps(AuthType.KIRO_DESKTOP, None)
+        assert "Kiro IDE" in result
+        assert "kiro-cli" not in result

@@ -65,6 +65,193 @@ SQLITE_REGISTRATION_KEYS = [
 ]
 
 
+# ==============================================================================
+# Auth Error Guidance (Chinese user-friendly messages)
+# ==============================================================================
+
+# Maps (error_code) -> (guidance_message)
+# Each entry provides actionable Chinese instructions for the specific error
+_AWS_SSO_ERROR_GUIDANCE = {
+    "invalid_grant": (
+        "\n"
+        "╔══════════════════════════════════════════════════════════════╗\n"
+        "║  🔑 认证令牌已过期 (Refresh Token Expired)                 ║\n"
+        "╠══════════════════════════════════════════════════════════════╣\n"
+        "║                                                            ║\n"
+        "║  原因: AWS SSO 刷新令牌已失效，无法自动续期。              ║\n"
+        "║                                                            ║\n"
+        "║  解决方法:                                                  ║\n"
+        "║  {fix_steps}"
+        "║                                                            ║\n"
+        "║  完成后重启 Gateway:                                       ║\n"
+        "║    python main.py                                          ║\n"
+        "║                                                            ║\n"
+        "╚══════════════════════════════════════════════════════════════╝"
+    ),
+    "unauthorized_client": (
+        "\n"
+        "╔══════════════════════════════════════════════════════════════╗\n"
+        "║  🔒 客户端凭证无效 (Unauthorized Client)                   ║\n"
+        "╠══════════════════════════════════════════════════════════════╣\n"
+        "║                                                            ║\n"
+        "║  原因: clientId 或 clientSecret 无效或已过期。             ║\n"
+        "║                                                            ║\n"
+        "║  解决方法:                                                  ║\n"
+        "║  {fix_steps}"
+        "║                                                            ║\n"
+        "║  完成后重启 Gateway:                                       ║\n"
+        "║    python main.py                                          ║\n"
+        "║                                                            ║\n"
+        "╚══════════════════════════════════════════════════════════════╝"
+    ),
+    "expired_token": (
+        "\n"
+        "╔══════════════════════════════════════════════════════════════╗\n"
+        "║  ⏰ 令牌已过期 (Token Expired)                             ║\n"
+        "╠══════════════════════════════════════════════════════════════╣\n"
+        "║                                                            ║\n"
+        "║  原因: 访问令牌已超时，需要重新登录获取新令牌。            ║\n"
+        "║                                                            ║\n"
+        "║  解决方法:                                                  ║\n"
+        "║  {fix_steps}"
+        "║                                                            ║\n"
+        "║  完成后重启 Gateway:                                       ║\n"
+        "║    python main.py                                          ║\n"
+        "║                                                            ║\n"
+        "╚══════════════════════════════════════════════════════════════╝"
+    ),
+}
+
+# Auth-type specific fix steps
+_FIX_STEPS_KIRO_IDE = (
+    "1. 打开 Kiro IDE 并重新登录                              ║\n"
+    "║    2. 登录成功后令牌文件会自动更新                          ║\n"
+)
+
+_FIX_STEPS_KIRO_CLI = (
+    "1. 运行: kiro-cli login                                  ║\n"
+    "║    2. 按提示在浏览器中完成登录                              ║\n"
+)
+
+_FIX_STEPS_ENV_TOKEN = (
+    "1. 重新获取 refresh token                                ║\n"
+    "║    2. 更新 .env 文件中的 REFRESH_TOKEN                     ║\n"
+)
+
+_KIRO_DESKTOP_REFRESH_GUIDANCE = (
+    "\n"
+    "╔══════════════════════════════════════════════════════════════╗\n"
+    "║  🔑 Kiro 认证刷新失败 (Token Refresh Failed)               ║\n"
+    "╠══════════════════════════════════════════════════════════════╣\n"
+    "║                                                            ║\n"
+    "║  原因: Kiro Desktop Auth 令牌刷新失败，令牌可能已过期。    ║\n"
+    "║                                                            ║\n"
+    "║  解决方法:                                                  ║\n"
+    "║  {fix_steps}"
+    "║                                                            ║\n"
+    "║  完成后重启 Gateway:                                       ║\n"
+    "║    python main.py                                          ║\n"
+    "║                                                            ║\n"
+    "╚══════════════════════════════════════════════════════════════╝"
+)
+
+_STARTUP_FAILURE_GUIDANCE = (
+    "\n"
+    "╔══════════════════════════════════════════════════════════════╗\n"
+    "║  ❌ 所有账号初始化失败 (All Accounts Failed)                ║\n"
+    "╠══════════════════════════════════════════════════════════════╣\n"
+    "║                                                            ║\n"
+    "║  Gateway 无法使用任何已配置的账号启动。                     ║\n"
+    "║                                                            ║\n"
+    "║  请检查以下内容:                                            ║\n"
+    "║                                                            ║\n"
+    "║  📁 凭证文件方式 (Kiro IDE):                               ║\n"
+    "║    1. 打开 Kiro IDE 并重新登录                              ║\n"
+    "║    2. 确认文件已更新:                                       ║\n"
+    "║       ~/.aws/sso/cache/kiro-auth-token.json                ║\n"
+    "║                                                            ║\n"
+    "║  🖥️  命令行方式 (kiro-cli):                                 ║\n"
+    "║    1. 运行: kiro-cli login                                  ║\n"
+    "║    2. 按提示在浏览器中完成登录                              ║\n"
+    "║                                                            ║\n"
+    "║  🔑 环境变量方式 (.env):                                    ║\n"
+    "║    1. 检查 .env 文件中的 REFRESH_TOKEN 是否有效             ║\n"
+    "║    2. 重新获取 token 并更新 .env 文件                       ║\n"
+    "║                                                            ║\n"
+    "║  🌐 网络问题:                                               ║\n"
+    "║    • 确认可以访问 AWS 服务                                  ║\n"
+    "║    • 如需代理，在 .env 中设置 VPN_PROXY_URL                ║\n"
+    "║                                                            ║\n"
+    "║  完成后重启 Gateway:                                       ║\n"
+    "║    python main.py                                          ║\n"
+    "║                                                            ║\n"
+    "║  💬 仍有问题? 请提交 Issue:                                 ║\n"
+    "║    https://github.com/jwadow/kiro-gateway/issues           ║\n"
+    "║                                                            ║\n"
+    "╚══════════════════════════════════════════════════════════════╝"
+)
+
+
+def _get_fix_steps(auth_type: "AuthType", sqlite_db: Optional[str]) -> str:
+    """
+    Get fix steps based on authentication type and credential source.
+
+    Args:
+        auth_type: Current authentication type
+        sqlite_db: SQLite database path (indicates kiro-cli usage)
+
+    Returns:
+        Formatted fix steps string for the guidance box
+    """
+    if sqlite_db:
+        return _FIX_STEPS_KIRO_CLI
+    # Check by value to avoid forward reference issues
+    if hasattr(auth_type, 'value') and auth_type.value == "aws_sso_oidc":
+        return _FIX_STEPS_KIRO_CLI
+    return _FIX_STEPS_KIRO_IDE
+
+
+def _get_auth_error_guidance(
+    error_code: str,
+    auth_type: "AuthType",
+    sqlite_db: Optional[str],
+) -> Optional[str]:
+    """
+    Get Chinese user-friendly guidance for an auth error.
+
+    Maps error codes to actionable Chinese messages with fix instructions
+    tailored to the user's authentication method.
+
+    Args:
+        error_code: Error code from AWS or internal identifier
+        auth_type: Current authentication type
+        sqlite_db: SQLite database path (indicates kiro-cli usage)
+
+    Returns:
+        Formatted guidance string, or None if no guidance available
+    """
+    fix_steps = _get_fix_steps(auth_type, sqlite_db)
+
+    if error_code == "kiro_desktop_refresh_failed":
+        return _KIRO_DESKTOP_REFRESH_GUIDANCE.format(fix_steps=fix_steps)
+
+    template = _AWS_SSO_ERROR_GUIDANCE.get(error_code)
+    if template:
+        return template.format(fix_steps=fix_steps)
+
+    return None
+
+
+def get_startup_failure_guidance() -> str:
+    """
+    Get Chinese guidance message for startup failure when all accounts fail.
+
+    Returns:
+        Comprehensive troubleshooting guidance string
+    """
+    return _STARTUP_FAILURE_GUIDANCE
+
+
 class AuthType(Enum):
     """
     Type of authentication mechanism.
@@ -704,7 +891,16 @@ class KiroAuthManager:
         
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(self._refresh_url, json=payload, headers=headers)
-            response.raise_for_status()
+            if response.status_code != 200:
+                error_body = response.text
+                logger.error(f"Kiro Desktop Auth refresh failed: status={response.status_code}, "
+                             f"body={error_body}")
+                guidance = _get_auth_error_guidance(
+                    "kiro_desktop_refresh_failed", self._auth_type, self._sqlite_db
+                )
+                if guidance:
+                    logger.error(guidance)
+                response.raise_for_status()
             data = response.json()
         
         new_access_token = data.get("accessToken")
@@ -834,6 +1030,8 @@ class KiroAuthManager:
                     error_desc = error_json.get("error_description", "no description")
                     logger.error(f"AWS SSO OIDC error details: error={error_code}, "
                                  f"description={error_desc}")
+                    # Provide Chinese guidance for common errors
+                    self._log_auth_error_guidance(error_code, error_desc)
                 except Exception:
                     pass  # Body wasn't JSON, already logged as text
                 response.raise_for_status()
@@ -864,6 +1062,21 @@ class KiroAuthManager:
         else:
             self._save_credentials_to_file()
     
+    def _log_auth_error_guidance(self, error_code: str, error_desc: str) -> None:
+        """
+        Log user-friendly Chinese guidance for AWS SSO OIDC errors.
+
+        Provides actionable instructions based on the specific error code
+        so users know exactly how to fix their authentication issues.
+
+        Args:
+            error_code: AWS error code (e.g. "invalid_grant", "unauthorized_client")
+            error_desc: AWS error description
+        """
+        guidance = _get_auth_error_guidance(error_code, self._auth_type, self._sqlite_db)
+        if guidance:
+            logger.error(guidance)
+
     async def get_access_token(self) -> str:
         """
         Returns a valid access_token, refreshing it if necessary.
