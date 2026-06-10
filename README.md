@@ -15,7 +15,7 @@ Made with ❤️ by [@Jwadow](https://github.com/jwadow)
 
 *Use Claude models from Kiro with Claude Code, OpenCode, OpenClaw, Claw Code, Codex app, Cursor, Cline, Roo Code, Kilo Code, Obsidian, OpenAI SDK, LangChain, Continue and other OpenAI or Anthropic compatible tools*
 
-[Models](#-supported-models) • [Features](#-features) • [Quick Start](#-quick-start) • [Configuration](#%EF%B8%8F-configuration) • [💖 Sponsor](#-support-the-project)
+[Claude Code 部署](#-claude-code-部署与使用) • [Models](#-supported-models) • [Features](#-features) • [Quick Start](#-quick-start) • [Configuration](#%EF%B8%8F-configuration) • [💖 Sponsor](#-support-the-project)
 
 </div>
 
@@ -69,6 +69,26 @@ Made with ❤️ by [@Jwadow](https://github.com/jwadow)
 
 ---
 
+## 🧑‍💻 Claude Code 部署与使用
+
+```bash
+# 1. 部署
+git clone https://github.com/Jwadow/kiro-gateway.git
+cd kiro-gateway
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+cp .env.example .env          # 编辑 .env 填入凭据
+
+# 2. 使用
+claude-kiro                   # 启动网关 + Claude Code（退出时自动关闭网关）
+kiro-gateway-start            # 单独启动网关（后台）
+kiro-gateway-stop             # 关闭网关
+```
+
+凭据来源（任选其一）：Kiro IDE 登录后的 `~/.aws/sso/cache/kiro-auth-token.json`，或 `kiro-cli login` 生成的 SQLite。
+
+---
+
 ## 🚀 Quick Start
 
 **Choose your deployment method:**
@@ -85,27 +105,57 @@ Made with ❤️ by [@Jwadow](https://github.com/jwadow)
 ### Installation
 
 ```bash
-# Clone the repository (requires Git)
+# Clone the repository
 git clone https://github.com/Jwadow/kiro-gateway.git
 cd kiro-gateway
 
-# Or download ZIP: Code → Download ZIP → extract → open kiro-gateway folder
-
-# Install dependencies
-pip install -r requirements.txt
+# Create virtualenv and install dependencies
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
 
 # Configure (see Configuration section)
 cp .env.example .env
-# Copy and edit .env with your credentials
 
 # Start the server
-python main.py
-
-# Or with custom port (if 8000 is busy)
-python main.py --port 9000
+.venv/bin/python main.py
 ```
 
 The server will be available at `http://localhost:8000`
+
+### Syncing Latest Features from Main Branch
+
+Keep your development branch synchronized with the latest features from `main`:
+
+```bash
+# Simple sync (recommended - maintains linear history with rebase)
+./bin/sync-from-main.sh
+
+# Preview changes without applying them
+./bin/sync-from-main.sh --dry-run
+
+# Use merge instead of rebase
+./bin/sync-from-main.sh --merge
+
+# Verbose output
+./bin/sync-from-main.sh -v
+```
+
+**Set up automatic daily synchronization:**
+
+```bash
+crontab -e
+# Add this line (syncs daily at 9 AM):
+# 0 9 * * * cd /path/to/kiro-gateway && ./bin/sync-from-main.sh >> logs/sync.log 2>&1
+```
+
+**Manual sync (if script unavailable):**
+
+```bash
+git fetch origin
+git checkout alex/dev  # or your dev branch
+git rebase origin/main
+git push -f origin alex/dev
+```
 
 ---
 
